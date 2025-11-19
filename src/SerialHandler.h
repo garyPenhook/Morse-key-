@@ -56,6 +56,7 @@ private:
     // Control line polling
     QTimer *m_pollTimer;
     bool m_lastKeyState;
+    int m_debounceCount;
 
     // Audio/sidetone
     QAudioSink *m_audioSink;

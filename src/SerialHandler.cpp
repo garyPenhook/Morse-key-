@@ -7,6 +7,7 @@ SerialHandler::SerialHandler(QObject *parent)
     , m_serialPort(new QSerialPort(this))
     , m_pollTimer(new QTimer(this))
     , m_lastKeyState(false)
+    , m_debounceCount(0)
     , m_audioSink(nullptr)
     , m_audioIO(nullptr)
     , m_audioTimer(new QTimer(this))
@@ -161,17 +162,23 @@ void SerialHandler::pollControlLines() {
         keyState = m_serialPort->pinoutSignals() & QSerialPort::DataSetReadySignal;
     }
 
-    // Detect state change
+    // Debounce: require consistent reading for 3 polls (6ms)
     if (keyState != m_lastKeyState) {
-        m_lastKeyState = keyState;
+        m_debounceCount++;
+        if (m_debounceCount >= 3) {
+            m_lastKeyState = keyState;
+            m_debounceCount = 0;
 
-        if (keyState) {
-            startTone();
-            emit keyDown();
-        } else {
-            stopTone();
-            emit keyUp();
+            if (keyState) {
+                startTone();
+                emit keyDown();
+            } else {
+                stopTone();
+                emit keyUp();
+            }
         }
+    } else {
+        m_debounceCount = 0;
     }
 }
 
