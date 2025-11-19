@@ -44,7 +44,7 @@ void SerialHandler::initializeAudio() {
     }
 
     m_audioSink = new QAudioSink(device, format, this);
-    m_audioSink->setBufferSize(4410); // Small buffer for low latency
+    m_audioSink->setBufferSize(8820); // ~200ms buffer for smooth playback
 
     generateToneData();
 }
@@ -75,7 +75,7 @@ void SerialHandler::startTone() {
     m_audioIO = m_audioSink->start();
     if (m_audioIO) {
         m_toneActive = true;
-        m_audioTimer->start(10); // Write audio every 10ms
+        m_audioTimer->start(5); // Write audio every 5ms for smooth tone
     }
 }
 
