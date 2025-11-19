@@ -43,6 +43,8 @@ void SerialHandler::initializeAudio() {
     m_audioSink = new QAudioSink(device, format, this);
     m_audioBuffer = new QBuffer(this);
 
+    connect(m_audioSink, &QAudioSink::stateChanged, this, &SerialHandler::onAudioStateChanged);
+
     generateToneData();
 }
 
@@ -81,9 +83,17 @@ void SerialHandler::startTone() {
 void SerialHandler::stopTone() {
     if (!m_toneActive || !m_audioSink) return;
 
+    m_toneActive = false;
     m_audioSink->stop();
     m_audioBuffer->close();
-    m_toneActive = false;
+}
+
+void SerialHandler::onAudioStateChanged(QAudio::State state) {
+    // Loop the audio if it finished but we still want tone
+    if (state == QAudio::IdleState && m_toneActive) {
+        m_audioBuffer->seek(0);
+        m_audioSink->start(m_audioBuffer);
+    }
 }
 
 QStringList SerialHandler::availablePorts() const {

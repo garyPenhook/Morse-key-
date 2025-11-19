@@ -41,6 +41,7 @@ private slots:
     void onReadyRead();
     void onErrorOccurred(QSerialPort::SerialPortError error);
     void pollControlLines();
+    void onAudioStateChanged(QAudio::State state);
 
 private:
     void parseData(const QByteArray& data);
