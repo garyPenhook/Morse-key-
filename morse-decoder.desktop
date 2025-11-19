@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Morse Key Decoder
+Comment=Decode Morse code from USB paddle/key adapter
+Exec=morse-decoder
+Icon=morse-decoder
+Terminal=false
+Type=Application
+Categories=Utility;HamRadio;Audio;
+Keywords=morse;cw;ham;radio;decoder;
