@@ -8,6 +8,7 @@
 #include <QAudioFormat>
 #include <QBuffer>
 #include <QTimer>
+#include <QThread>
 
 class SerialHandler : public QObject {
     Q_OBJECT
@@ -40,7 +41,7 @@ signals:
 private slots:
     void onReadyRead();
     void onErrorOccurred(QSerialPort::SerialPortError error);
-    void pollControlLines();
+    void monitorControlLines();
     void writeAudioData();
 
 private:
@@ -53,10 +54,10 @@ private:
     QSerialPort *m_serialPort;
     QByteArray m_buffer;
 
-    // Control line polling
-    QTimer *m_pollTimer;
+    // Control line monitoring
+    QThread *m_monitorThread;
     bool m_lastKeyState;
-    int m_debounceCount;
+    bool m_monitoring;
 
     // Audio/sidetone
     QAudioSink *m_audioSink;

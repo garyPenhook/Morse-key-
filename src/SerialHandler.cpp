@@ -1,13 +1,16 @@
 #include "SerialHandler.h"
 #include <QMediaDevices>
 #include <QtMath>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 SerialHandler::SerialHandler(QObject *parent)
     : QObject(parent)
     , m_serialPort(new QSerialPort(this))
-    , m_pollTimer(new QTimer(this))
+    , m_monitorThread(nullptr)
     , m_lastKeyState(false)
-    , m_debounceCount(0)
+    , m_monitoring(false)
     , m_audioSink(nullptr)
     , m_audioIO(nullptr)
     , m_audioTimer(new QTimer(this))
@@ -19,7 +22,6 @@ SerialHandler::SerialHandler(QObject *parent)
 {
     connect(m_serialPort, &QSerialPort::readyRead, this, &SerialHandler::onReadyRead);
     connect(m_serialPort, &QSerialPort::errorOccurred, this, &SerialHandler::onErrorOccurred);
-    connect(m_pollTimer, &QTimer::timeout, this, &SerialHandler::pollControlLines);
     connect(m_audioTimer, &QTimer::timeout, this, &SerialHandler::writeAudioData);
 
     initializeAudio();
@@ -44,7 +46,7 @@ void SerialHandler::initializeAudio() {
     }
 
     m_audioSink = new QAudioSink(device, format, this);
-    m_audioSink->setBufferSize(4410); // Small buffer for low latency
+    m_audioSink->setBufferSize(8820); // ~200ms buffer for smooth playback
 
     generateToneData();
 }
@@ -75,7 +77,7 @@ void SerialHandler::startTone() {
     m_audioIO = m_audioSink->start();
     if (m_audioIO) {
         m_toneActive = true;
-        m_audioTimer->start(10); // Write audio every 10ms
+        m_audioTimer->start(5); // Write audio every 5ms for smooth tone
     }
 }
 
@@ -134,7 +136,12 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
         // Enable DTR to power the device
         m_serialPort->setDataTerminalReady(true);
         m_lastKeyState = false;
-        m_pollTimer->start(2); // Poll every 2ms
+        m_monitoring = true;
+
+        // Start monitoring thread
+        m_monitorThread = QThread::create([this]() { monitorControlLines(); });
+        m_monitorThread->start();
+
         emit connected();
         return true;
     } else {
@@ -144,41 +151,56 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
 }
 
 void SerialHandler::disconnect() {
-    m_pollTimer->stop();
+    m_monitoring = false;
+    if (m_monitorThread) {
+        m_monitorThread->quit();
+        m_monitorThread->wait(100);
+        delete m_monitorThread;
+        m_monitorThread = nullptr;
+    }
     if (m_serialPort->isOpen()) {
         m_serialPort->close();
         emit disconnected();
     }
 }
 
-void SerialHandler::pollControlLines() {
-    if (!m_serialPort->isOpen()) return;
+void SerialHandler::monitorControlLines() {
+    int fd = m_serialPort->handle();
+    if (fd < 0) return;
 
-    // Check CTS (Clear To Send) line - commonly used for key state
-    bool keyState = m_serialPort->pinoutSignals() & QSerialPort::ClearToSendSignal;
-
-    // Some devices use DSR instead
-    if (!keyState) {
-        keyState = m_serialPort->pinoutSignals() & QSerialPort::DataSetReadySignal;
-    }
-
-    // Debounce: require consistent reading for 3 polls (6ms)
-    if (keyState != m_lastKeyState) {
-        m_debounceCount++;
-        if (m_debounceCount >= 3) {
-            m_lastKeyState = keyState;
-            m_debounceCount = 0;
-
-            if (keyState) {
-                startTone();
-                emit keyDown();
-            } else {
-                stopTone();
-                emit keyUp();
+    while (m_monitoring && m_serialPort->isOpen()) {
+        // Wait for CTS or DSR change (interrupt-driven)
+        int waitMask = TIOCM_CTS | TIOCM_DSR;
+        if (ioctl(fd, TIOCMIWAIT, waitMask) < 0) {
+            if (m_monitoring) {
+                // Small delay on error to prevent busy loop
+                QThread::msleep(10);
             }
+            continue;
         }
-    } else {
-        m_debounceCount = 0;
+
+        if (!m_monitoring) break;
+
+        // Get current state
+        int status = 0;
+        if (ioctl(fd, TIOCMGET, &status) < 0) continue;
+
+        bool keyState = (status & TIOCM_CTS) || (status & TIOCM_DSR);
+
+        if (keyState != m_lastKeyState) {
+            m_lastKeyState = keyState;
+
+            // Use Qt's thread-safe signal emission
+            QMetaObject::invokeMethod(this, [this, keyState]() {
+                if (keyState) {
+                    startTone();
+                    emit keyDown();
+                } else {
+                    stopTone();
+                    emit keyUp();
+                }
+            }, Qt::QueuedConnection);
+        }
     }
 }
 
