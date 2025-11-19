@@ -65,6 +65,7 @@ void SerialHandler::generateToneData() {
 void SerialHandler::startTone() {
     if (!m_sidetoneEnabled || !m_audioSink || m_toneActive) return;
 
+    m_audioBuffer->close();
     m_audioBuffer->setData(m_toneData);
     m_audioBuffer->open(QIODevice::ReadOnly);
     m_audioSink->start(m_audioBuffer);
@@ -75,7 +76,6 @@ void SerialHandler::stopTone() {
     if (!m_toneActive || !m_audioSink) return;
 
     m_audioSink->stop();
-    m_audioBuffer->close();
     m_toneActive = false;
 }
 
@@ -104,7 +104,7 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
         // Enable DTR to power the device
         m_serialPort->setDataTerminalReady(true);
         m_lastKeyState = false;
-        m_pollTimer->start(1); // Poll every 1ms for responsive keying
+        m_pollTimer->start(5); // Poll every 5ms for responsive keying
         emit connected();
         return true;
     } else {
