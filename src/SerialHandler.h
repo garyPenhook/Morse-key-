@@ -40,6 +40,7 @@ signals:
 private slots:
     void onReadyRead();
     void onErrorOccurred(QSerialPort::SerialPortError error);
+    void pollControlLines();
 
 private:
     void parseData(const QByteArray& data);
@@ -50,6 +51,10 @@ private:
 
     QSerialPort *m_serialPort;
     QByteArray m_buffer;
+
+    // Control line polling
+    QTimer *m_pollTimer;
+    bool m_lastKeyState;
 
     // Audio/sidetone
     QAudioSink *m_audioSink;
