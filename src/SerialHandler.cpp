@@ -5,7 +5,6 @@
 SerialHandler::SerialHandler(QObject *parent)
     : QObject(parent)
     , m_serialPort(new QSerialPort(this))
-    , m_pollTimer(new QTimer(this))
     , m_lastKeyState(false)
     , m_audioSink(nullptr)
     , m_audioBuffer(nullptr)
@@ -16,7 +15,7 @@ SerialHandler::SerialHandler(QObject *parent)
 {
     connect(m_serialPort, &QSerialPort::readyRead, this, &SerialHandler::onReadyRead);
     connect(m_serialPort, &QSerialPort::errorOccurred, this, &SerialHandler::onErrorOccurred);
-    connect(m_pollTimer, &QTimer::timeout, this, &SerialHandler::pollControlLines);
+    connect(m_serialPort, &QSerialPort::pinoutSignalsChanged, this, &SerialHandler::onPinoutSignalsChanged);
 
     initializeAudio();
 }
@@ -104,7 +103,6 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
         // Enable DTR to power the device
         m_serialPort->setDataTerminalReady(true);
         m_lastKeyState = false;
-        m_pollTimer->start(5); // Poll every 5ms for responsive keying
         emit connected();
         return true;
     } else {
@@ -114,18 +112,16 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
 }
 
 void SerialHandler::disconnect() {
-    m_pollTimer->stop();
     if (m_serialPort->isOpen()) {
         m_serialPort->close();
         emit disconnected();
     }
 }
 
-void SerialHandler::pollControlLines() {
+void SerialHandler::onPinoutSignalsChanged() {
     if (!m_serialPort->isOpen()) return;
 
     // Check CTS (Clear To Send) line - commonly used for key state
-    // Also check DSR and DCD as fallbacks
     bool keyState = m_serialPort->pinoutSignals() & QSerialPort::ClearToSendSignal;
 
     // Some devices use DSR instead
