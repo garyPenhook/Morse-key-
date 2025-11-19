@@ -17,10 +17,11 @@ A Linux Mint GUI application that interfaces with the CW Morse "My Key Serial" U
 
 | Component | Technology | Rationale |
 |-----------|------------|-----------|
-| Language | Python 3.x | Cross-platform, excellent serial/GUI libraries |
-| GUI Framework | PyQt6 | Modern, feature-rich, good Linux Mint integration |
-| Serial Communication | pyserial | Industry standard for serial port access |
-| Audio Feedback | pygame or simpleaudio | Optional sidetone generation |
+| Language | C++17 | Performance, native Qt integration |
+| GUI Framework | Qt6 | Modern, feature-rich, excellent Linux support |
+| Serial Communication | QSerialPort | Native Qt module, cross-platform |
+| Build System | CMake | Industry standard for C++ projects |
+| Audio Feedback | QSoundEffect | Optional sidetone generation |
 
 ### System Components
 
@@ -45,18 +46,18 @@ A Linux Mint GUI application that interfaces with the CW Morse "My Key Serial" U
 └─────────────────────────────────────────────────────┘
 ```
 
-### Core Modules
+### Core Classes
 
-#### 1. `serial_handler.py` - Serial Communication
+#### 1. `SerialHandler` - Serial Communication
 - Auto-detect available serial ports
 - Connect/disconnect management
-- Read serial data in separate thread
+- Read serial data using Qt signals/slots
 - Support multiple protocols:
   - **Character mode**: Device sends ASCII characters
   - **Timing mode**: Device sends key-down/key-up events with timestamps
   - **DTR/RTS mode**: Uses control lines for key state
 
-#### 2. `morse_decoder.py` - Morse Code Decoding
+#### 2. `MorseDecoder` - Morse Code Decoding
 - Real-time timing analysis
 - Dit/dah discrimination based on element duration
 - Character/word boundary detection
@@ -65,14 +66,14 @@ A Linux Mint GUI application that interfaces with the CW Morse "My Key Serial" U
   - Prosigns (AR, SK, BT, etc.)
   - Adjustable WPM (5-50 WPM)
 
-#### 3. `main_window.py` - GUI Application
+#### 3. `MainWindow` - GUI Application
 - Serial port configuration panel
 - Real-time decoded text display
 - Visual dit/dah indicator
 - Settings persistence
 - Clear/copy/save functionality
 
-#### 4. `morse_table.py` - Morse Code Lookup
+#### 4. `MorseTable` - Morse Code Lookup
 - Complete International Morse Code table
 - Bidirectional lookup (code↔character)
 - Prosign support
@@ -90,18 +91,20 @@ At 20 WPM: 1 unit ≈ 60ms
 
 ### Adaptive Timing Algorithm
 
-```python
-# Distinguish dit from dah
-if element_duration < (dit_avg + dah_avg) / 2:
-    element = 'dit'
-else:
-    element = 'dah'
+```cpp
+// Distinguish dit from dah
+if (elementDuration < (ditAvg + dahAvg) / 2) {
+    element = Element::Dit;
+} else {
+    element = Element::Dah;
+}
 
-# Update running averages
-if element == 'dit':
-    dit_avg = 0.8 * dit_avg + 0.2 * element_duration
-else:
-    dah_avg = 0.8 * dah_avg + 0.2 * element_duration
+// Update running averages
+if (element == Element::Dit) {
+    ditAvg = 0.8 * ditAvg + 0.2 * elementDuration;
+} else {
+    dahAvg = 0.8 * dahAvg + 0.2 * elementDuration;
+}
 ```
 
 ## Serial Protocol Support
@@ -133,86 +136,76 @@ Morse-key-/
 ├── CLAUDE.md              # This design document
 ├── README.md              # User documentation
 ├── LICENSE                # Project license
-├── requirements.txt       # Python dependencies
-├── setup.py              # Installation script
+├── CMakeLists.txt         # Main CMake configuration
 ├── src/
-│   ├── __init__.py
-│   ├── main.py           # Application entry point
-│   ├── main_window.py    # Main GUI window
-│   ├── serial_handler.py # Serial port management
-│   ├── morse_decoder.py  # Morse decoding logic
-│   ├── morse_table.py    # Morse code definitions
-│   ├── settings.py       # Configuration management
-│   └── resources/
-│       ├── icon.png      # Application icon
-│       └── sounds/       # Sidetone audio files
-├── tests/
-│   ├── test_decoder.py
-│   └── test_morse_table.py
-└── docs/
-    └── screenshots/
+│   ├── CMakeLists.txt     # Source CMake configuration
+│   ├── main.cpp           # Application entry point
+│   ├── MainWindow.h       # Main window header
+│   ├── MainWindow.cpp     # Main window implementation
+│   ├── SerialHandler.h    # Serial port management header
+│   ├── SerialHandler.cpp  # Serial port management implementation
+│   ├── MorseDecoder.h     # Morse decoding header
+│   ├── MorseDecoder.cpp   # Morse decoding implementation
+│   ├── MorseTable.h       # Morse code definitions header
+│   └── MorseTable.cpp     # Morse code definitions implementation
+├── resources/
+│   ├── resources.qrc      # Qt resource file
+│   └── icons/             # Application icons
+└── tests/
+    ├── CMakeLists.txt
+    └── test_decoder.cpp
 ```
 
 ## Implementation Phases
 
 ### Phase 1: Core Foundation
-- [ ] Project structure setup
+- [ ] Project structure setup with CMake
 - [ ] Morse code table implementation
 - [ ] Basic decoder logic with timing analysis
-- [ ] Unit tests for decoder
 
 ### Phase 2: Serial Communication
 - [ ] Serial port detection and listing
 - [ ] Connection management
-- [ ] Threaded serial reading
-- [ ] Protocol auto-detection
+- [ ] Signal-based serial reading
 
 ### Phase 3: GUI Development
 - [ ] Main window layout
 - [ ] Serial configuration panel
 - [ ] Text display area
 - [ ] Visual feedback (dit/dah indicator)
-- [ ] Settings dialog
 
 ### Phase 4: Integration & Polish
 - [ ] Connect all components
 - [ ] Settings persistence (QSettings)
 - [ ] Error handling and user feedback
-- [ ] Sidetone audio (optional)
 - [ ] Application packaging
-
-### Phase 5: Testing & Documentation
-- [ ] Real device testing
-- [ ] Edge case handling
-- [ ] User documentation
-- [ ] Installation instructions
 
 ## Dependencies
 
-```txt
-PyQt6>=6.4.0
-pyserial>=3.5
+### System Packages (Linux Mint)
+```bash
+sudo apt install build-essential cmake qt6-base-dev qt6-serialport-dev qt6-multimedia-dev
 ```
 
 ## Installation (Linux Mint)
 
 ```bash
 # Install system dependencies
-sudo apt install python3-pip python3-venv
+sudo apt install build-essential cmake qt6-base-dev qt6-serialport-dev qt6-multimedia-dev
 
-# Clone and setup
+# Clone and build
 git clone <repository>
 cd Morse-key-
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
 
 # Add user to dialout group for serial access
 sudo usermod -a -G dialout $USER
 # (Logout/login required)
 
 # Run application
-python src/main.py
+./morse-decoder
 ```
 
 ## Configuration Options
@@ -223,7 +216,7 @@ python src/main.py
 | `baud_rate` | 9600 | Serial baud rate |
 | `wpm` | 20 | Words per minute |
 | `dit_dah_ratio` | 3.0 | Dah/dit duration ratio |
-| `sidetone_enabled` | False | Audio feedback |
+| `sidetone_enabled` | false | Audio feedback |
 | `sidetone_freq` | 600 | Sidetone frequency (Hz) |
 
 ## Error Handling
@@ -247,8 +240,8 @@ python src/main.py
 
 - [International Morse Code](https://en.wikipedia.org/wiki/Morse_code)
 - [ARRL Morse Code Timing](http://www.arrl.org/learning-morse-code)
-- [PySerial Documentation](https://pyserial.readthedocs.io/)
-- [PyQt6 Documentation](https://www.riverbankcomputing.com/static/Docs/PyQt6/)
+- [Qt6 Serial Port](https://doc.qt.io/qt-6/qtserialport-index.html)
+- [Qt6 Documentation](https://doc.qt.io/qt-6/)
 
 ## Notes
 
@@ -256,5 +249,5 @@ The CW Morse "My Key Serial" adapter documentation should be consulted for exact
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 1.1 - C++ Implementation*
 *Last Updated: 2025-11-19*
