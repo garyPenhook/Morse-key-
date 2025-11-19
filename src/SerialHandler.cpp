@@ -63,10 +63,16 @@ void SerialHandler::generateToneData() {
 }
 
 void SerialHandler::startTone() {
-    if (!m_sidetoneEnabled || !m_audioSink || m_toneActive) return;
+    if (!m_sidetoneEnabled || !m_audioSink) return;
+
+    if (m_toneActive) {
+        // Already playing, just reset buffer position
+        m_audioBuffer->seek(0);
+        return;
+    }
 
     m_audioBuffer->close();
-    m_audioBuffer->setData(m_toneData);
+    m_audioBuffer->setBuffer(&m_toneData);
     m_audioBuffer->open(QIODevice::ReadOnly);
     m_audioSink->start(m_audioBuffer);
     m_toneActive = true;
@@ -76,6 +82,7 @@ void SerialHandler::stopTone() {
     if (!m_toneActive || !m_audioSink) return;
 
     m_audioSink->stop();
+    m_audioBuffer->close();
     m_toneActive = false;
 }
 
