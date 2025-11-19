@@ -49,9 +49,13 @@ void SerialHandler::initializeAudio() {
 }
 
 void SerialHandler::generateToneData() {
-    // Generate 100ms of tone data for low latency
+    // Generate tone data that loops cleanly (multiple of wavelength)
     const int sampleRate = 44100;
-    const int numSamples = sampleRate / 10; // 100ms
+
+    // Calculate samples per cycle and make buffer hold complete cycles
+    int samplesPerCycle = sampleRate / m_sidetoneFreq;
+    int numCycles = qMax(1, (sampleRate / 10) / samplesPerCycle); // ~100ms worth
+    int numSamples = numCycles * samplesPerCycle;
 
     m_toneData.resize(numSamples * sizeof(qint16));
     qint16 *data = reinterpret_cast<qint16*>(m_toneData.data());
@@ -185,11 +189,13 @@ void SerialHandler::setSidetoneEnabled(bool enabled) {
 void SerialHandler::setSidetoneFrequency(int frequency) {
     m_sidetoneFreq = qBound(200, frequency, 1500);
     generateToneData();
+    m_tonePos = 0; // Reset position to avoid audio glitches
 }
 
 void SerialHandler::setSidetoneVolume(float volume) {
     m_sidetoneVolume = qBound(0.0f, volume, 1.0f);
     generateToneData();
+    m_tonePos = 0; // Reset position to avoid audio glitches
 }
 
 void SerialHandler::onReadyRead() {
