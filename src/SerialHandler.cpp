@@ -91,7 +91,9 @@ void SerialHandler::stopTone() {
 void SerialHandler::onAudioStateChanged(QAudio::State state) {
     // Loop the audio if it finished but we still want tone
     if (state == QAudio::IdleState && m_toneActive) {
-        m_audioBuffer->seek(0);
+        m_audioBuffer->close();
+        m_audioBuffer->setBuffer(&m_toneData);
+        m_audioBuffer->open(QIODevice::ReadOnly);
         m_audioSink->start(m_audioBuffer);
     }
 }
