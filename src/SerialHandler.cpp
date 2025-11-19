@@ -49,10 +49,9 @@ void SerialHandler::initializeAudio() {
 }
 
 void SerialHandler::generateToneData() {
-    // Generate 1 second of tone data
+    // Generate 100ms of tone data for low latency
     const int sampleRate = 44100;
-    const int duration = 1; // seconds
-    const int numSamples = sampleRate * duration;
+    const int numSamples = sampleRate / 10; // 100ms
 
     m_toneData.resize(numSamples * sizeof(qint16));
     qint16 *data = reinterpret_cast<qint16*>(m_toneData.data());
