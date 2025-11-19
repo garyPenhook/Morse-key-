@@ -8,7 +8,9 @@ SerialHandler::SerialHandler(QObject *parent)
     , m_pollTimer(new QTimer(this))
     , m_lastKeyState(false)
     , m_audioSink(nullptr)
-    , m_audioBuffer(nullptr)
+    , m_audioIO(nullptr)
+    , m_audioTimer(new QTimer(this))
+    , m_tonePos(0)
     , m_sidetoneEnabled(true)
     , m_sidetoneFreq(600)
     , m_sidetoneVolume(0.5f)
@@ -17,6 +19,7 @@ SerialHandler::SerialHandler(QObject *parent)
     connect(m_serialPort, &QSerialPort::readyRead, this, &SerialHandler::onReadyRead);
     connect(m_serialPort, &QSerialPort::errorOccurred, this, &SerialHandler::onErrorOccurred);
     connect(m_pollTimer, &QTimer::timeout, this, &SerialHandler::pollControlLines);
+    connect(m_audioTimer, &QTimer::timeout, this, &SerialHandler::writeAudioData);
 
     initializeAudio();
 }
@@ -25,7 +28,6 @@ SerialHandler::~SerialHandler() {
     stopTone();
     disconnect();
     delete m_audioSink;
-    delete m_audioBuffer;
 }
 
 void SerialHandler::initializeAudio() {
@@ -41,18 +43,15 @@ void SerialHandler::initializeAudio() {
     }
 
     m_audioSink = new QAudioSink(device, format, this);
-    m_audioBuffer = new QBuffer(this);
-
-    connect(m_audioSink, &QAudioSink::stateChanged, this, &SerialHandler::onAudioStateChanged);
+    m_audioSink->setBufferSize(4410); // Small buffer for low latency
 
     generateToneData();
 }
 
 void SerialHandler::generateToneData() {
-    // Generate 1 second of tone data
+    // Generate 100ms of tone data for low latency
     const int sampleRate = 44100;
-    const int duration = 1; // seconds
-    const int numSamples = sampleRate * duration;
+    const int numSamples = sampleRate / 10; // 100ms
 
     m_toneData.resize(numSamples * sizeof(qint16));
     qint16 *data = reinterpret_cast<qint16*>(m_toneData.data());
@@ -65,36 +64,43 @@ void SerialHandler::generateToneData() {
 }
 
 void SerialHandler::startTone() {
-    if (!m_sidetoneEnabled || !m_audioSink) return;
+    if (!m_sidetoneEnabled || !m_audioSink || m_toneActive) return;
 
-    if (m_toneActive) {
-        // Already playing, just reset buffer position
-        m_audioBuffer->seek(0);
-        return;
+    m_tonePos = 0;
+    m_audioIO = m_audioSink->start();
+    if (m_audioIO) {
+        m_toneActive = true;
+        m_audioTimer->start(10); // Write audio every 10ms
     }
-
-    m_audioBuffer->close();
-    m_audioBuffer->setBuffer(&m_toneData);
-    m_audioBuffer->open(QIODevice::ReadOnly);
-    m_audioSink->start(m_audioBuffer);
-    m_toneActive = true;
 }
 
 void SerialHandler::stopTone() {
     if (!m_toneActive || !m_audioSink) return;
 
-    m_toneActive = false;
+    m_audioTimer->stop();
     m_audioSink->stop();
-    m_audioBuffer->close();
+    m_audioIO = nullptr;
+    m_toneActive = false;
 }
 
-void SerialHandler::onAudioStateChanged(QAudio::State state) {
-    // Loop the audio if it finished but we still want tone
-    if (state == QAudio::IdleState && m_toneActive) {
-        m_audioBuffer->close();
-        m_audioBuffer->setBuffer(&m_toneData);
-        m_audioBuffer->open(QIODevice::ReadOnly);
-        m_audioSink->start(m_audioBuffer);
+void SerialHandler::writeAudioData() {
+    if (!m_audioIO || !m_toneActive) return;
+
+    // Write chunks of audio data
+    int bytesToWrite = m_audioSink->bytesFree();
+    if (bytesToWrite > 0) {
+        int dataSize = m_toneData.size();
+        QByteArray chunk;
+        chunk.reserve(bytesToWrite);
+
+        while (chunk.size() < bytesToWrite) {
+            int remaining = dataSize - m_tonePos;
+            int toWrite = qMin(remaining, bytesToWrite - chunk.size());
+            chunk.append(m_toneData.mid(m_tonePos, toWrite));
+            m_tonePos = (m_tonePos + toWrite) % dataSize;
+        }
+
+        m_audioIO->write(chunk);
     }
 }
 

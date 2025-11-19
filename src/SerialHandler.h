@@ -41,7 +41,7 @@ private slots:
     void onReadyRead();
     void onErrorOccurred(QSerialPort::SerialPortError error);
     void pollControlLines();
-    void onAudioStateChanged(QAudio::State state);
+    void writeAudioData();
 
 private:
     void parseData(const QByteArray& data);
@@ -59,8 +59,10 @@ private:
 
     // Audio/sidetone
     QAudioSink *m_audioSink;
-    QBuffer *m_audioBuffer;
+    QIODevice *m_audioIO;
     QByteArray m_toneData;
+    QTimer *m_audioTimer;
+    int m_tonePos;
     bool m_sidetoneEnabled;
     int m_sidetoneFreq;
     float m_sidetoneVolume;
