@@ -1,5 +1,6 @@
 #include "SerialHandler.h"
 #include <QMediaDevices>
+#include <QDebug>
 #include <QtMath>
 #include <sys/ioctl.h>
 #include <fcntl.h>
