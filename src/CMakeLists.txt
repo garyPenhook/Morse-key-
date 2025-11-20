@@ -4,6 +4,7 @@ set(SOURCES
     SerialHandler.cpp
     MorseDecoder.cpp
     MorseTable.cpp
+    ToneGenerator.cpp
 )
 
 set(HEADERS
@@ -11,6 +12,7 @@ set(HEADERS
     SerialHandler.h
     MorseDecoder.h
     MorseTable.h
+    ToneGenerator.h
 )
 
 add_executable(morse-decoder ${SOURCES} ${HEADERS})

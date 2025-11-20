@@ -23,7 +23,6 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow() {
     saveSettings();
 }
-
 void MainWindow::setupUi() {
     setWindowTitle("Morse Key Decoder");
     setMinimumSize(600, 500);
@@ -243,20 +242,39 @@ void MainWindow::onElementDecoded(const QString& element) {
 }
 
 void MainWindow::onCharacterDecoded(QChar character) {
-    m_decodedText->moveCursor(QTextCursor::End);
     m_decodedText->insertPlainText(QString(character));
+    trimDecodedText();
     m_currentMorse->clear();
 }
 
 void MainWindow::onWordSpaceDetected() {
-    m_decodedText->moveCursor(QTextCursor::End);
     m_decodedText->insertPlainText(" ");
+    trimDecodedText();
 }
 
 void MainWindow::onDecodingError(const QString& pattern) {
-    m_decodedText->moveCursor(QTextCursor::End);
     m_decodedText->insertPlainText("[" + pattern + "?]");
+    trimDecodedText();
     m_currentMorse->clear();
+}
+
+void MainWindow::trimDecodedText() {
+    // Trim text if it exceeds maximum line count to prevent memory issues
+    QTextDocument *doc = m_decodedText->document();
+    int lineCount = doc->lineCount();
+
+    if (lineCount > MAX_DISPLAY_LINES) {
+        QTextCursor cursor(doc);
+        // Find the line to delete up to
+        cursor.movePosition(QTextCursor::Start);
+        int linesToDelete = lineCount - TRIM_TO_LINES;
+
+        for (int i = 0; i < linesToDelete; ++i) {
+            cursor.select(QTextCursor::LineUnderCursor);
+            cursor.removeSelectedText();
+            cursor.deleteChar(); // Remove the newline
+        }
+    }
 }
 
 void MainWindow::onWpmChanged(int value) {

@@ -48,10 +48,15 @@ private:
     void saveSettings();
     void refreshPorts();
     void updateConnectionState(bool connected);
+    void trimDecodedText();
 
     // Serial and decoder
     SerialHandler *m_serialHandler;
     MorseDecoder *m_morseDecoder;
+
+    // Constants for performance limits
+    static constexpr int MAX_DISPLAY_LINES = 1000;
+    static constexpr int TRIM_TO_LINES = 800;
 
     // UI Components
     QComboBox *m_portCombo;

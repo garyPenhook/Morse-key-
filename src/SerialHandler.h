@@ -6,9 +6,28 @@
 #include <QSerialPortInfo>
 #include <QAudioSink>
 #include <QAudioFormat>
-#include <QBuffer>
 #include <QTimer>
 #include <QThread>
+#include <atomic>
+
+class ToneGenerator;
+
+class KeyWatcher : public QThread {
+    Q_OBJECT
+public:
+    explicit KeyWatcher(int fd, QObject *parent = nullptr);
+    void stop();
+
+signals:
+    void keyStateChanged(bool down);
+
+protected:
+    void run() override;
+
+private:
+    int m_fd;
+    std::atomic<bool> m_running;
+};
 
 class SerialHandler : public QObject {
     Q_OBJECT
@@ -41,7 +60,7 @@ signals:
 private slots:
     void onReadyRead();
     void onErrorOccurred(QSerialPort::SerialPortError error);
-    void monitorControlLines();
+    void onKeyStateChanged(bool down);
     void writeAudioData();
 
 private:
@@ -49,26 +68,29 @@ private:
     void initializeAudio();
     void startTone();
     void stopTone();
-    void generateToneData();
 
     QSerialPort *m_serialPort;
     QByteArray m_buffer;
 
-    // Control line monitoring
-    QThread *m_monitorThread;
-    bool m_lastKeyState;
-    bool m_monitoring;
+    // Serial parsing state machine
+    enum class ParseState {
+        WaitingForK,
+        WaitingForDigit,
+        WaitingForNewline
+    };
+    ParseState m_parseState = ParseState::WaitingForK;
 
-    // Audio/sidetone
+    // Control line monitoring (interrupt-driven)
+    KeyWatcher *m_keyWatcher;
+
+    // Audio/sidetone (push-mode)
     QAudioSink *m_audioSink;
+    ToneGenerator *m_toneGenerator;
     QIODevice *m_audioIO;
-    QByteArray m_toneData;
     QTimer *m_audioTimer;
-    int m_tonePos;
     bool m_sidetoneEnabled;
     int m_sidetoneFreq;
     float m_sidetoneVolume;
-    bool m_toneActive;
 };
 
 #endif // SERIALHANDLER_H

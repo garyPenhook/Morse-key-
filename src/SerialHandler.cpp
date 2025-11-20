@@ -1,25 +1,53 @@
 #include "SerialHandler.h"
+#include "ToneGenerator.h"
 #include <QMediaDevices>
 #include <QDebug>
-#include <QtMath>
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 
+// KeyWatcher implementation - uses TIOCMIWAIT for interrupt-driven detection
+KeyWatcher::KeyWatcher(int fd, QObject *parent)
+    : QThread(parent)
+    , m_fd(fd)
+    , m_running(true)
+{
+}
+
+void KeyWatcher::stop()
+{
+    m_running = false;
+}
+
+void KeyWatcher::run()
+{
+    int state = 0;
+    ioctl(m_fd, TIOCMGET, &state);
+    bool lastKeyDown = (state & TIOCM_CTS) || (state & TIOCM_DSR);
+
+    while (m_running) {
+        // Tight polling loop - no sleep for maximum responsiveness
+        ioctl(m_fd, TIOCMGET, &state);
+        bool keyDown = (state & TIOCM_CTS) || (state & TIOCM_DSR);
+
+        if (keyDown != lastKeyDown) {
+            lastKeyDown = keyDown;
+            emit keyStateChanged(keyDown);
+        }
+    }
+}
+
 SerialHandler::SerialHandler(QObject *parent)
     : QObject(parent)
     , m_serialPort(new QSerialPort(this))
-    , m_monitorThread(nullptr)
-    , m_lastKeyState(false)
-    , m_monitoring(false)
+    , m_keyWatcher(nullptr)
     , m_audioSink(nullptr)
+    , m_toneGenerator(nullptr)
     , m_audioIO(nullptr)
     , m_audioTimer(new QTimer(this))
-    , m_tonePos(0)
     , m_sidetoneEnabled(true)
     , m_sidetoneFreq(600)
     , m_sidetoneVolume(0.5f)
-    , m_toneActive(false)
 {
     connect(m_serialPort, &QSerialPort::readyRead, this, &SerialHandler::onReadyRead);
     connect(m_serialPort, &QSerialPort::errorOccurred, this, &SerialHandler::onErrorOccurred);
@@ -29,9 +57,18 @@ SerialHandler::SerialHandler(QObject *parent)
 }
 
 SerialHandler::~SerialHandler() {
-    stopTone();
-    disconnect();
-    delete m_audioSink;
+    if (m_keyWatcher) {
+        m_keyWatcher->stop();
+        m_keyWatcher->wait(100);
+        delete m_keyWatcher;
+    }
+    m_audioTimer->stop();
+    if (m_audioSink) {
+        m_audioSink->stop();
+    }
+    if (m_serialPort && m_serialPort->isOpen()) {
+        m_serialPort->close();
+    }
 }
 
 void SerialHandler::initializeAudio() {
@@ -41,74 +78,52 @@ void SerialHandler::initializeAudio() {
     format.setSampleFormat(QAudioFormat::Int16);
 
     QAudioDevice device = QMediaDevices::defaultAudioOutput();
-    if (!device.isFormatSupported(format)) {
-        qWarning() << "Audio format not supported";
+    if (device.isNull()) {
+        qWarning() << "No audio output device found";
         return;
     }
+    if (!device.isFormatSupported(format)) {
+        qWarning() << "Audio format not supported, trying preferred format";
+        format = device.preferredFormat();
+    }
+
+    m_toneGenerator = new ToneGenerator(format, this);
+    m_toneGenerator->setFrequency(m_sidetoneFreq);
+    m_toneGenerator->setVolume(m_sidetoneVolume);
+    m_toneGenerator->start();
 
     m_audioSink = new QAudioSink(device, format, this);
-    m_audioSink->setBufferSize(8820); // ~200ms buffer for smooth playback
+    m_audioSink->setBufferSize(512);  // Minimum buffer for fastest response
 
-    generateToneData();
-}
-
-void SerialHandler::generateToneData() {
-    // Generate tone data that loops cleanly (multiple of wavelength)
-    const int sampleRate = 44100;
-
-    // Calculate samples per cycle and make buffer hold complete cycles
-    int samplesPerCycle = sampleRate / m_sidetoneFreq;
-    int numCycles = qMax(1, (sampleRate / 10) / samplesPerCycle); // ~100ms worth
-    int numSamples = numCycles * samplesPerCycle;
-
-    m_toneData.resize(numSamples * sizeof(qint16));
-    qint16 *data = reinterpret_cast<qint16*>(m_toneData.data());
-
-    for (int i = 0; i < numSamples; ++i) {
-        qreal t = static_cast<qreal>(i) / sampleRate;
-        qreal value = qSin(2.0 * M_PI * m_sidetoneFreq * t);
-        data[i] = static_cast<qint16>(value * 32767 * m_sidetoneVolume);
+    // Start in push mode - we write data via timer
+    m_audioIO = m_audioSink->start();
+    if (m_audioIO) {
+        m_audioTimer->start(1);  // Write every 1ms for low latency
+    } else {
+        qWarning() << "Failed to start audio";
     }
 }
 
 void SerialHandler::startTone() {
-    if (!m_sidetoneEnabled || !m_audioSink || m_toneActive) return;
-
-    m_tonePos = 0;
-    m_audioIO = m_audioSink->start();
-    if (m_audioIO) {
-        m_toneActive = true;
-        m_audioTimer->start(5); // Write audio every 5ms for smooth tone
-    }
+    if (!m_sidetoneEnabled || !m_toneGenerator) return;
+    m_toneGenerator->setActive(true);
 }
 
 void SerialHandler::stopTone() {
-    if (!m_toneActive || !m_audioSink) return;
-
-    m_audioTimer->stop();
-    m_audioSink->stop();
-    m_audioIO = nullptr;
-    m_toneActive = false;
+    if (!m_toneGenerator) return;
+    m_toneGenerator->setActive(false);
 }
 
 void SerialHandler::writeAudioData() {
-    if (!m_audioIO || !m_toneActive) return;
+    if (!m_audioIO || !m_toneGenerator) return;
 
-    // Write chunks of audio data
-    int bytesToWrite = m_audioSink->bytesFree();
-    if (bytesToWrite > 0) {
-        int dataSize = m_toneData.size();
-        QByteArray chunk;
-        chunk.reserve(bytesToWrite);
-
-        while (chunk.size() < bytesToWrite) {
-            int remaining = dataSize - m_tonePos;
-            int toWrite = qMin(remaining, bytesToWrite - chunk.size());
-            chunk.append(m_toneData.mid(m_tonePos, toWrite));
-            m_tonePos = (m_tonePos + toWrite) % dataSize;
+    int bytesFree = m_audioSink->bytesFree();
+    if (bytesFree > 0) {
+        QByteArray buffer(bytesFree, 0);
+        qint64 bytesRead = m_toneGenerator->read(buffer.data(), bytesFree);
+        if (bytesRead > 0) {
+            m_audioIO->write(buffer.data(), bytesRead);
         }
-
-        m_audioIO->write(chunk);
     }
 }
 
@@ -134,14 +149,14 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
     m_serialPort->setFlowControl(QSerialPort::NoFlowControl);
 
     if (m_serialPort->open(QIODevice::ReadWrite)) {
-        // Enable DTR to power the device
         m_serialPort->setDataTerminalReady(true);
-        m_lastKeyState = false;
-        m_monitoring = true;
 
-        // Start monitoring thread
-        m_monitorThread = QThread::create([this]() { monitorControlLines(); });
-        m_monitorThread->start();
+        // Start interrupt-driven key watcher
+        int fd = m_serialPort->handle();
+        m_keyWatcher = new KeyWatcher(fd, this);
+        connect(m_keyWatcher, &KeyWatcher::keyStateChanged,
+                this, &SerialHandler::onKeyStateChanged, Qt::DirectConnection);
+        m_keyWatcher->start();
 
         emit connected();
         return true;
@@ -152,12 +167,11 @@ bool SerialHandler::connectToPort(const QString& portName, qint32 baudRate) {
 }
 
 void SerialHandler::disconnect() {
-    m_monitoring = false;
-    if (m_monitorThread) {
-        m_monitorThread->quit();
-        m_monitorThread->wait(100);
-        delete m_monitorThread;
-        m_monitorThread = nullptr;
+    if (m_keyWatcher) {
+        m_keyWatcher->stop();
+        m_keyWatcher->wait(100);
+        delete m_keyWatcher;
+        m_keyWatcher = nullptr;
     }
     if (m_serialPort->isOpen()) {
         m_serialPort->close();
@@ -165,43 +179,13 @@ void SerialHandler::disconnect() {
     }
 }
 
-void SerialHandler::monitorControlLines() {
-    int fd = m_serialPort->handle();
-    if (fd < 0) return;
-
-    while (m_monitoring && m_serialPort->isOpen()) {
-        // Wait for CTS or DSR change (interrupt-driven)
-        int waitMask = TIOCM_CTS | TIOCM_DSR;
-        if (ioctl(fd, TIOCMIWAIT, waitMask) < 0) {
-            if (m_monitoring) {
-                // Small delay on error to prevent busy loop
-                QThread::msleep(10);
-            }
-            continue;
-        }
-
-        if (!m_monitoring) break;
-
-        // Get current state
-        int status = 0;
-        if (ioctl(fd, TIOCMGET, &status) < 0) continue;
-
-        bool keyState = (status & TIOCM_CTS) || (status & TIOCM_DSR);
-
-        if (keyState != m_lastKeyState) {
-            m_lastKeyState = keyState;
-
-            // Use Qt's thread-safe signal emission
-            QMetaObject::invokeMethod(this, [this, keyState]() {
-                if (keyState) {
-                    startTone();
-                    emit keyDown();
-                } else {
-                    stopTone();
-                    emit keyUp();
-                }
-            }, Qt::QueuedConnection);
-        }
+void SerialHandler::onKeyStateChanged(bool down) {
+    if (down) {
+        startTone();
+        emit keyDown();
+    } else {
+        stopTone();
+        emit keyUp();
     }
 }
 
@@ -218,14 +202,16 @@ void SerialHandler::setSidetoneEnabled(bool enabled) {
 
 void SerialHandler::setSidetoneFrequency(int frequency) {
     m_sidetoneFreq = qBound(200, frequency, 1500);
-    generateToneData();
-    m_tonePos = 0; // Reset position to avoid audio glitches
+    if (m_toneGenerator) {
+        m_toneGenerator->setFrequency(m_sidetoneFreq);
+    }
 }
 
 void SerialHandler::setSidetoneVolume(float volume) {
     m_sidetoneVolume = qBound(0.0f, volume, 1.0f);
-    generateToneData();
-    m_tonePos = 0; // Reset position to avoid audio glitches
+    if (m_toneGenerator) {
+        m_toneGenerator->setVolume(m_sidetoneVolume);
+    }
 }
 
 void SerialHandler::onReadyRead() {
@@ -236,31 +222,40 @@ void SerialHandler::onReadyRead() {
 }
 
 void SerialHandler::parseData(const QByteArray& data) {
-    // Parse different protocols
     for (char c : data) {
-        switch (c) {
-        case 'K':
-            // Wait for next char
+        if (m_parseState == ParseState::WaitingForK && (c == '\n' || c == '\r')) {
+            continue;
+        }
+
+        switch (m_parseState) {
+        case ParseState::WaitingForK:
+            if (c == 'K') {
+                m_parseState = ParseState::WaitingForDigit;
+            } else if (c == '.') {
+                emit elementReceived(true);
+            } else if (c == '-') {
+                emit elementReceived(false);
+            }
             break;
-        case '1':
-            // Key down - start sidetone
-            startTone();
-            emit keyDown();
+
+        case ParseState::WaitingForDigit:
+            if (c == '1') {
+                startTone();
+                emit keyDown();
+                m_parseState = ParseState::WaitingForNewline;
+            } else if (c == '0') {
+                stopTone();
+                emit keyUp();
+                m_parseState = ParseState::WaitingForNewline;
+            } else {
+                m_parseState = ParseState::WaitingForK;
+            }
             break;
-        case '0':
-            // Key up - stop sidetone
-            stopTone();
-            emit keyUp();
-            break;
-        case '.':
-            // Dit in character mode
-            emit elementReceived(true);
-            break;
-        case '-':
-            // Dah in character mode
-            emit elementReceived(false);
-            break;
-        default:
+
+        case ParseState::WaitingForNewline:
+            if (c == '\n' || c == '\r') {
+                m_parseState = ParseState::WaitingForK;
+            }
             break;
         }
     }
