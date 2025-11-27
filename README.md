@@ -2,6 +2,13 @@
 
 A Linux GUI application for decoding Morse code from a CW Morse "My Key Serial" USB adapter or compatible device.
 
+[![C++](https://img.shields.io/badge/C%2B%2B-17-blue)](https://isocpp.org/)
+[![Qt](https://img.shields.io/badge/Qt-6-green)](https://www.qt.io/)
+[![License](https://img.shields.io/github/license/garyPenhook/Morse-key-)](https://github.com/garyPenhook/Morse-key-/blob/main/LICENSE)
+[![Last Commit](https://img.shields.io/github/last-commit/garyPenhook/Morse-key-)](https://github.com/garyPenhook/Morse-key-/commits)
+[![Platform](https://img.shields.io/badge/platform-linux-lightgrey)](https://github.com/garyPenhook/Morse-key-)
+[![Ham Radio](https://img.shields.io/badge/ham%20radio-morse%20code-red)](https://github.com/garyPenhook/Morse-key-)
+
 ## Features
 
 - Real-time Morse code decoding to text
